@@ -2,46 +2,41 @@ from ultralytics import YOLO
 import os
 import json
 import time
+from metrics import compute_map
 
-# Paths
 TEST_IMAGE_DIR = "datasets/coco_test/test100"
 TEST_ANNOTATION_FILE = "datasets/coco_test/annotations/test100.json"
 
-# Load YOLOv8 model
 def load_model():
     print("Loading pre-trained YOLOv8 model...")
-    model = YOLO("yolov8n.pt")  # Using a lightweight version
-    print("Model loaded successfully")
-    return model
+    return YOLO("yolov8n.pt")
 
-# Run inference on test dataset
 def evaluate_yolo():
     model = load_model()
 
-    # Load test annotations
     with open(TEST_ANNOTATION_FILE, "r") as f:
-        coco_data = json.load(f)
+        coco_json = json.load(f)
+    ground_truths = coco_json["annotations"]
+    images_info = coco_json["images"]
 
-    image_files = [img["file_name"] for img in coco_data["images"]]
-    
-    total_images = len(image_files)
-    print(f"Evaluating YOLOv8 on {total_images} images...")
-
+    predictions = []
     start_time = time.time()
 
-    for img_file in image_files[:100]:  # Limit to 100 images
-        img_path = os.path.join(TEST_IMAGE_DIR, img_file)
+    for idx, img_info in enumerate(images_info[:100]):
+        img_path = os.path.join(TEST_IMAGE_DIR, img_info["file_name"])
+        print(f"[YOLO {idx+1}/100] Processing: {img_info['file_name']}")
         results = model(img_path)
 
-        print(f"\nPredictions for {img_file}:")
         for box in results[0].boxes:
-            print(f"Class: {box.cls}, Confidence: {box.conf.item():.4f}, Box: {box.xyxy.numpy()}")
+            predictions.append({
+                "image_id": img_info["id"],
+                "label": int(box.cls),
+                "score": float(box.conf),
+                "bbox": box.xyxy.numpy().flatten().tolist()
+            })
 
-    total_time = time.time() - start_time
-    avg_time = total_time / total_images
-    print(f"\nYOLOv8 Avg Inference Time per Image: {avg_time:.4f} sec")
+    avg_time = (time.time() - start_time) / 100
+    yolo_map = compute_map(predictions, ground_truths)
 
-    return avg_time
-
-if __name__ == "__main__":
-    evaluate_yolo()
+    print(f"\nYOLOv8 mAP@50: {yolo_map:.4f}, Avg Inference Time: {avg_time:.4f} sec")
+    return yolo_map, avg_time, predictions
